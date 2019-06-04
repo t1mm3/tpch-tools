@@ -112,6 +112,7 @@ for binary in mclient; do
 	[[ -n `which $binary` ]] || die "Missing MonetDB binary $binary"
 done
 
+num_reps=6
 
 mkdir -p "$result_dir"
 query_number_length=${#num_queries}
@@ -124,12 +125,23 @@ for ((i=1;i<=num_queries;i++)); do
 		[[ "$be_verbose" ]] && echo "mclient -lsql -f $format -d $db_name -p $db_port -h $hostname -s \"$query\"  > \"$output_file\""
 		mclient -lsql -f $format -d $db_name -p $db_port -h $hostname -s "$query" > $output_file
 	else
-		echo "Query $formatted_query_number"
+		# echo "Query $formatted_query_number"
 		if ! db_is_up $db_name; then monetdb -p $db_port stop $db_name > /dev/null ;  fi
-		monetdb -p $db_port set "nthreads=1" $db_name
+		monetdb -p $db_port set "nthreads=1" $db_name > /dev/null
 		monetdb -p $db_port start $db_name > /dev/null
 		[[ "$be_verbose" ]] && echo "Query $formatted_query_number: $query" 
-		mclient -e -t performance -lsql -f $format -d $db_name -p $db_port -h $hostname -s "$query" 
+		output_file="$result_dir/$formatted_query_number.ans"
+		min_time_ms=10000000
+		for ((r=1;r<=num_reps;r++)); do
+			rm -rf $output_file
+			mclient -e -t performance -lsql -f $format -d $db_name -p $db_port -h $hostname -s "$query" &> $output_file
+			time_ms=$(cat $output_file | tail -n2 | grep "clk:" | grep ms | awk -F: '{print $2}' | awk -F. '{print $1}')
+			echo "Q $formatted_query_number $time_ms ms REP $r"
+
+			min_time_ms=$(($min_time_ms<$time_ms?$min_time_ms:$time_ms))
+		done
+
+		echo "Q $formatted_query_number $min_time_ms ms REP 0"
 		[[ "$be_verbose" ]] && echo 
 	fi
 done
